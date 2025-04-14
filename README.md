@@ -19,7 +19,23 @@ A Python utility for extracting and evaluating test results from Certificate of 
 
 ## Installation
 
-### For End Users (Windows)
+### For End Users (Windows 10 Pro)
+
+1. Navigate to the `WINDOWS_10_PRO_PKG` folder in this repository
+2. Run `build.bat` as administrator
+3. The script will:
+   - Install all required dependencies
+   - Build the application
+   - Create the installer
+4. After the build completes, find the installer in the `Output` directory
+5. Run `COA_Analyzer_Setup.exe` to install the application
+
+System Requirements:
+- Windows 10 Pro
+- 500MB free disk space
+- Internet connection (for dependency installation)
+
+### For End Users (Other Windows Versions)
 
 1. Download the latest installer (`COA_Analyzer_Setup.exe`) from the releases page
 2. Run the installer
