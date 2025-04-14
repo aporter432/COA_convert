@@ -1,42 +1,27 @@
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
-
-[project]
+[tool.poetry]
 name = "coa-analyzer"
 version = "0.1.0"
-description = "Certificate of Analysis (COA) Analyzer"
-authors = [
-    {name = "Your Name", email = "your.email@example.com"}
-]
+description = "Certificate of Analysis (COA) Analyzer with GUI"
+authors = ["Your Name <your.email@example.com>"]
 readme = "README.md"
-requires-python = ">=3.8"
-license = {text = "MIT"}
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-]
-dependencies = [
-    "PyPDF2>=3.0.0",
-    "pdf2image>=1.17.0",
-    "pytesseract>=0.3.10",
-]
+packages = [{include = "coa_analyzer"}]
 
-[project.optional-dependencies]
-dev = [
-    "reportlab>=3.6.0",
-    "pytest>=7.0.0",
-]
+[tool.poetry.dependencies]
+python = "^3.8"
+PyQt6 = "^6.6.1"
+PyPDF2 = "^3.0.1"
+pdf2image = "^1.16.3"
+pytesseract = "^0.3.10"
+Pillow = "^10.2.0"
 
-[project.scripts]
-coa-analyzer = "coa_analyzer.cli:main"
+[tool.poetry.group.dev.dependencies]
+reportlab = "^3.6.0"
+pytest = "^7.0.0"
+black = "^24.1.1"
+isort = "^5.13.2"
 
-[tool.setuptools.packages.find]
-include = ["coa_analyzer*"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
+[tool.poetry.scripts]
+coa-analyzer = "coa_analyzer.coa_analyzer:main"
 
 [tool.black]
 line-length = 88
@@ -46,14 +31,5 @@ target-version = ["py38"]
 profile = "black"
 line_length = 88
 
-[tool.poetry]
-name = "coa-analyzer"
-version = "0.1.0"
-description = "A tool for analyzing Certificates of Analysis (COA) documents"
-authors = ["Your Name <your.email@example.com>"]
-
-[tool.poetry.dependencies]
-python = "^3.12"
-PyPDF2 = "^3.0.0"
-pdf2image = "^1.17.0"
-pytesseract = "^0.3.10" 
+[tool.pytest.ini_options]
+testpaths = ["tests"] 

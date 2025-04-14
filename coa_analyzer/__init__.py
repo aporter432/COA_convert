@@ -1,6 +1,3 @@
-"""Certificate of Analysis (COA) Analyzer.
-
-A tool for extracting and evaluating test results from Certificate of Analysis documents.
-"""
+"""COA Analyzer package for analyzing Certificates of Analysis documents."""
 
 __version__ = "0.1.0" 
