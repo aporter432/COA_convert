@@ -3,8 +3,19 @@ import sys
 import argparse
 import csv
 import os
+import logging
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('coa_processing.log')
+    ]
+)
 
 
 @dataclass
@@ -64,93 +75,110 @@ def extract_coa_data(raw_text: str) -> List[TestResult]:
     """Extract test data from COA text."""
     lines = raw_text.strip().split('\n')
     results = []
+    seen_test_results = set()  # Track unique test results
     
-    # Find the Certificate of Analysis section
-    coa_start = -1
+    # Find all COA sections
+    coa_sections = []
+    start_idx = -1
+    
     for i, line in enumerate(lines):
         if "CERTIFICATE OF ANALYSIS" in line:
-            coa_start = i
-            break
+            if start_idx != -1:
+                coa_sections.append((start_idx, i))
+            start_idx = i
     
-    if coa_start == -1:
-        return []  # No COA section found
+    if start_idx != -1:
+        coa_sections.append((start_idx, len(lines)))
     
-    # Find the test results section
-    test_names = []
-    test_methods = []
-    units = []
-    values = []
-    specs = []
+    if not coa_sections:
+        return []
     
-    # Current section being read
-    current_section = None
-    
-    # Process lines after COA header
-    for line in lines[coa_start:]:
-        line = line.strip()
-        if not line:
-            continue
-            
-        # Skip metadata lines
-        if any(x in line for x in ["Batch", "Qty /Uom", "Material:", "Our/Customer Reference", "Page", "THE PRODUCT"]):
-            continue
-            
-        # Check for section headers
-        if "Test Name" in line:
-            current_section = "names"
-            continue
-        elif "Test Method" in line:
-            current_section = "methods"
-            continue
-        elif "Unit" in line:
-            current_section = "units"
-            continue
-        elif "Value" in line:
-            current_section = "values"
-            continue
-        elif "Specification" in line:
-            current_section = "specs"
-            continue
-            
-        # Add data to appropriate list if it looks valid
-        if current_section == "names" and re.match(r'^[A-Za-z0-9\']+', line):
-            if line not in ["DATE OF PRODUCTION", "COUNTRY OF ORIGIN"]:
-                test_names.append(line)
-        elif current_section == "methods" and re.match(r'^N200\.\d+', line):
-            test_methods.append(line)
-        elif current_section == "units" and line in ["dNm", "min.", "%", "min"]:
-            units.append(line)
-        elif current_section == "values" and re.match(r'^\d+\.?\d*$', line):
-            values.append(line)
-        elif current_section == "specs" and ("=" in line or "-" in line or any(x in line for x in ["<", ">"])):
-            specs.append(line)
-    
-    # Create test results from the collected data
-    for i in range(len(test_names)):
-        name = test_names[i]
-        method = test_methods[i] if i < len(test_methods) else ""
-        unit = units[i] if i < len(units) else ""
-        value = values[i] if i < len(values) else ""
-        spec = specs[i] if i < len(specs) else ""
+    # Process each COA section
+    for start_idx, end_idx in coa_sections:
+        section_lines = lines[start_idx:end_idx]
         
-        # Skip non-test entries
-        if name in ["DATE OF PRODUCTION", "COUNTRY OF ORIGIN"]:
-            continue
+        # Find the test results section
+        test_names = []
+        test_methods = []
+        units = []
+        values = []
+        specs = []
+        
+        # Current section being read
+        current_section = None
+        
+        # Process lines in this COA section
+        for line in section_lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Skip metadata lines
+            if any(x in line for x in ["Batch", "Qty /Uom", "Material:", "Our/Customer Reference", "Page", "THE PRODUCT"]):
+                continue
+                
+            # Check for section headers
+            if "Test Name" in line:
+                current_section = "names"
+                continue
+            elif "Test Method" in line:
+                current_section = "methods"
+                continue
+            elif "Unit" in line:
+                current_section = "units"
+                continue
+            elif "Value" in line:
+                current_section = "values"
+                continue
+            elif "Specification" in line:
+                current_section = "specs"
+                continue
+                
+            # Add data to appropriate list if it looks valid
+            if current_section == "names" and re.match(r'^[A-Za-z0-9\']+', line):
+                if line not in ["DATE OF PRODUCTION", "COUNTRY OF ORIGIN"]:
+                    test_names.append(line)
+            elif current_section == "methods" and re.match(r'^N200\.\d+', line):
+                test_methods.append(line)
+            elif current_section == "units" and line in ["dNm", "min.", "%", "min"]:
+                units.append(line)
+            elif current_section == "values" and re.match(r'^\d+\.?\d*$', line):
+                values.append(line)
+            elif current_section == "specs" and ("=" in line or "-" in line or any(x in line for x in ["<", ">"])):
+                specs.append(line)
+        
+        # Create test results from the collected data
+        for i in range(len(test_names)):
+            name = test_names[i]
+            method = test_methods[i] if i < len(test_methods) else ""
+            unit = units[i] if i < len(units) else ""
+            value = values[i] if i < len(values) else ""
+            spec = specs[i] if i < len(specs) else ""
             
-        # Handle special cases
-        if name == "ML100" and not unit:
-            unit = ""  # ML100 typically has no unit
-        
-        result = evaluate_result(value, spec)
-        
-        results.append(TestResult(
-            name=name,
-            method=method,
-            unit=unit,
-            value=value,
-            specification=spec,
-            result=result
-        ))
+            # Skip non-test entries
+            if name in ["DATE OF PRODUCTION", "COUNTRY OF ORIGIN"]:
+                continue
+                
+            # Handle special cases
+            if name == "ML100" and not unit:
+                unit = ""  # ML100 typically has no unit
+            
+            # Create unique key for this test result
+            result_key = f"{name}_{method}_{value}_{spec}"
+            if result_key in seen_test_results:
+                continue
+            
+            seen_test_results.add(result_key)
+            result = evaluate_result(value, spec)
+            
+            results.append(TestResult(
+                name=name,
+                method=method,
+                unit=unit,
+                value=value,
+                specification=spec,
+                result=result
+            ))
     
     return results
 
@@ -161,34 +189,133 @@ def extract_metadata(raw_text: str) -> Dict[str, str]:
     lines = raw_text.strip().split('\n')
     
     # Extract material information
-    for line in lines:
-        if "Material:" in line:
-            parts = line.split(":", 1)
-            if len(parts) > 1:
-                metadata["Material"] = parts[1].strip()
-        
-        elif "Reference No:" in line:
-            parts = line.split(":", 1)
-            if len(parts) > 1:
-                metadata["Reference"] = parts[1].strip()
-        
-        elif "Batch" in line:
-            # Look for batch information in next line
-            batch_idx = lines.index(line)
-            if batch_idx + 1 < len(lines) and lines[batch_idx + 1].strip():
-                metadata["Batch"] = lines[batch_idx + 1].strip()
+    material_pattern = re.compile(r'Material:?\s*([A-Z0-9]+\s+[A-Z0-9\s]+(?:CHP|GRT|GNA)\s+[A-Z0-9\s]+)')
+    reference_pattern = re.compile(r'(?:Reference No:|CPN:|Sales Order No\.|Order No\.?)\s*([A-Z0-9]+)')
     
-    # Look for production date and country
+    # Enhanced batch pattern to handle more formats
+    batch_patterns = [
+        re.compile(r'(?:Batch|Lot|Batch No\.?|Batch Number)\s*[:.]?\s*([0-9A-Z]+(?:[A-Z][0-9]+)?)', re.IGNORECASE),
+        re.compile(r'(?:Batch|Lot)\s*ID\s*[:.]?\s*([0-9A-Z]+(?:[A-Z][0-9]+)?)', re.IGNORECASE),
+        re.compile(r'^\s*([0-9]{6}[A-Z][0-9]{3})\s*$'),  # Format like: 241226D257
+        re.compile(r'(?:Batch|Lot)\s*#\s*[:.]?\s*([0-9A-Z]+(?:[A-Z][0-9]+)?)', re.IGNORECASE),
+        re.compile(r'(?:Batch|Lot)\s*:\s*([0-9A-Z]+(?:[A-Z][0-9]+)?)', re.IGNORECASE),
+        re.compile(r'(?:Batch|Lot)\s*=\s*([0-9A-Z]+(?:[A-Z][0-9]+)?)', re.IGNORECASE),
+        re.compile(r'Batch\s+([0-9]{6}[A-Z][0-9]{3})\s+[0-9,]+\s*/LB', re.IGNORECASE),  # Format from delivery note
+        re.compile(r'Batch\s+([0-9]{6}[A-Z][0-9]{3})', re.IGNORECASE),  # Simpler delivery note format
+        re.compile(r'Batch\s*\n\s*([0-9]{6}[A-Z][0-9]{3})', re.IGNORECASE),  # Format with newline
+        re.compile(r'Batch\s*\n\s*([0-9A-Z]+)', re.IGNORECASE),  # Generic format with newline
+        re.compile(r'(?:Batch|Lot)\s*\n\s*([0-9]{6}[A-Z][0-9]{3})\s*\n', re.IGNORECASE),  # OCR format with newlines
+        re.compile(r'(?:Batch|Lot)\s*\n\s*([0-9A-Z]+)\s*\n', re.IGNORECASE),  # Generic OCR format with newlines
+        re.compile(r'(?:Batch|Lot)\s*\n([0-9]{6}[A-Z][0-9]{3})', re.IGNORECASE),  # OCR format with single newline
+        re.compile(r'(?:Batch|Lot)\s*\n([0-9A-Z]+)', re.IGNORECASE)  # Generic OCR format with single newline
+    ]
+    
+    batch_found = False
+    logging.debug("Starting metadata extraction...")
+    logging.debug(f"Total lines to process: {len(lines)}")
+    logging.debug("Raw text content:")
+    logging.debug("-" * 80)
+    logging.debug(raw_text)
+    logging.debug("-" * 80)
+    
+    # First pass: look for batch number in standard format
     for i, line in enumerate(lines):
+        logging.debug(f"\nProcessing line {i}: '{line}'")
+        
+        # Look for material info
+        if material_match := material_pattern.search(line):
+            metadata["Material"] = material_match.group(1).strip()
+            logging.debug(f"Found material: {metadata['Material']}")
+            continue
+        
+        # Look for reference number
+        if reference_match := reference_pattern.search(line):
+            metadata["Reference"] = reference_match.group(1).strip()
+            logging.debug(f"Found reference: {metadata['Reference']}")
+            continue
+        
+        # Try all batch patterns
+        if not batch_found:
+            # Try single line patterns
+            for pattern_idx, pattern in enumerate(batch_patterns):
+                if batch_match := pattern.search(line):
+                    metadata["Batch"] = batch_match.group(1).strip()
+                    batch_found = True
+                    logging.debug(f"Found batch number using pattern {pattern_idx}: {metadata['Batch']}")
+                    logging.debug(f"Pattern used: {pattern.pattern}")
+                    break
+            
+            # Try multi-line patterns if we're not at the last line
+            if not batch_found and i < len(lines) - 2:
+                three_lines = '\n'.join(lines[i:i+3])
+                logging.debug(f"Trying multi-line pattern with lines:\n{three_lines}")
+                for pattern_idx, pattern in enumerate(batch_patterns):
+                    if batch_match := pattern.search(three_lines):
+                        metadata["Batch"] = batch_match.group(1).strip()
+                        batch_found = True
+                        logging.debug(f"Found batch number using multi-line pattern {pattern_idx}: {metadata['Batch']}")
+                        logging.debug(f"Pattern used: {pattern.pattern}")
+                        break
+            
+            if batch_found:
+                continue
+        
+        # Look for production date and country
         if "DATE OF PRODUCTION" in line:
             parts = re.split(r'\s{2,}', line)
             if len(parts) > 1:
                 metadata["Production Date"] = parts[-1].strip()
+                logging.debug(f"Found production date: {metadata['Production Date']}")
+            continue
         
-        elif "COUNTRY OF ORIGIN" in line:
+        if "COUNTRY OF ORIGIN" in line:
             parts = re.split(r'\s{2,}', line)
             if len(parts) > 1:
                 metadata["Country"] = parts[-1].strip()
+                logging.debug(f"Found country: {metadata['Country']}")
+    
+    # Second pass: if no batch found, look for standalone batch number
+    if "Batch" not in metadata:
+        logging.debug("\nNo batch found in first pass, trying second pass...")
+        batch_idx = -1
+        qty_idx = -1
+        
+        for i, line in enumerate(lines):
+            line_upper = line.upper()
+            if any(x in line_upper for x in ["BATCH", "LOT"]):
+                batch_idx = i
+                logging.debug(f"Found batch header at line {i}: '{line}'")
+                # Check the next line for a batch number
+                if i + 1 < len(lines):
+                    next_line = lines[i + 1].strip()
+                    logging.debug(f"Checking next line for batch number: '{next_line}'")
+                    if re.match(r'^[0-9]{6}[A-Z][0-9]{3}$', next_line):
+                        metadata["Batch"] = next_line
+                        batch_found = True
+                        logging.debug(f"Found batch number in next line: {metadata['Batch']}")
+                        break
+            elif "QTY" in line_upper:
+                qty_idx = i
+                logging.debug(f"Found qty header at line {i}: '{line}'")
+                break
+        
+        if not batch_found and batch_idx != -1 and qty_idx != -1:
+            logging.debug(f"\nLooking between lines {batch_idx+1} and {qty_idx}")
+            # Look at lines between batch and qty
+            for line in lines[batch_idx+1:qty_idx]:
+                line = line.strip()
+                logging.debug(f"Checking line between batch and qty: '{line}'")
+                if re.match(r'^[0-9A-Z]+(?:[A-Z][0-9]+)?$', line):
+                    metadata["Batch"] = line
+                    batch_found = True
+                    logging.debug(f"Found standalone batch number: {metadata['Batch']}")
+                    break
+    
+    if "Batch" not in metadata:
+        logging.warning("No batch number found in the document")
+        metadata["Batch"] = "N/A"  # Set default value if no batch number found
+    else:
+        logging.info(f"Successfully extracted batch number: {metadata['Batch']}")
     
     return metadata
 
@@ -278,11 +405,18 @@ def print_results(results: List[TestResult], metadata: Dict[str, str], show_asci
 def save_to_csv(results: List[TestResult], metadata: Dict[str, str], output_file: str):
     """Save results to a CSV file."""
     with open(output_file, 'w', newline='') as csvfile:
-        # Write metadata
         writer = csv.writer(csvfile)
+        
+        # Write metadata header
         writer.writerow(['Metadata'])
-        for key, value in metadata.items():
-            writer.writerow([key, value])
+        
+        # Write metadata in a specific order for consistency
+        metadata_order = ['Material', 'Reference', 'Batch', 'Production Date', 'Country']
+        for key in metadata_order:
+            if key in metadata:
+                writer.writerow([key, metadata[key]])
+            elif key == 'Batch':
+                writer.writerow(['Batch', 'N/A'])  # Always include batch number, even if not found
         
         writer.writerow([])  # Blank row
         
@@ -319,31 +453,64 @@ def save_to_csv(results: List[TestResult], metadata: Dict[str, str], output_file
                     writer.writerow([result.name, result.value, result.specification])
 
 
+def is_coa_page(text: str) -> bool:
+    """Determine if a page contains COA data."""
+    # Check for common COA indicators
+    indicators = [
+        "CERTIFICATE OF ANALYSIS",
+        "Test Name",
+        "Test Method",
+        "Unit",
+        "Value",
+        "Specification",
+        "Batch",
+        "Material:",
+        "Reference No:"
+    ]
+    
+    # Count how many indicators are present
+    matches = sum(1 for indicator in indicators if indicator in text)
+    
+    # If we find at least 3 indicators, it's likely a COA page
+    return matches >= 3
+
+
 def read_pdf_file(file_path: str) -> str:
     """Extract text from a PDF file."""
     try:
         # First try regular text extraction
         from PyPDF2 import PdfReader
         reader = PdfReader(file_path)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text()
+        coa_text = ""
+        
+        logging.info(f"Processing PDF: {file_path}")
+        logging.info(f"Total pages: {len(reader.pages)}")
+        
+        # Process each page
+        for i, page in enumerate(reader.pages):
+            text = page.extract_text()
+            
+            # Check if this is a COA page
+            if is_coa_page(text):
+                logging.info(f"Found COA data on page {i+1}")
+                coa_text += text
+                coa_text += "\n\n"  # Add spacing between pages
         
         # If we got text, return it
-        if text.strip():
-            return text
+        if coa_text.strip():
+            logging.info("Successfully extracted text from PDF")
+            return coa_text
         
         # If no text was extracted, try OCR
-        print("No text found in PDF, attempting OCR...")
+        logging.info("No text found in PDF, attempting OCR...")
         from pdf2image import convert_from_path
         import pytesseract
         import tempfile
-        import os
         
         # Convert PDF to images
         with tempfile.TemporaryDirectory() as path:
             images = convert_from_path(file_path)
-            text = ""
+            coa_text = ""
             
             # Process each page
             for i, image in enumerate(images):
@@ -353,19 +520,28 @@ def read_pdf_file(file_path: str) -> str:
                 
                 # Extract text using OCR
                 page_text = pytesseract.image_to_string(temp_file)
-                text += page_text
-                text += "\n\n"  # Add spacing between pages
+                
+                # Check if this is a COA page
+                if is_coa_page(page_text):
+                    logging.info(f"Found COA data on page {i+1} using OCR")
+                    coa_text += page_text
+                    coa_text += "\n\n"  # Add spacing between pages
                 
                 # Debug output
-                print(f"\nOCR Output for page {i+1}:")
-                print("-" * 80)
-                print(page_text)
-                print("-" * 80)
+                logging.debug(f"\nOCR Output for page {i+1}:")
+                logging.debug("-" * 80)
+                logging.debug(page_text)
+                logging.debug("-" * 80)
         
-        return text
+        if not coa_text.strip():
+            logging.warning("No COA data found in the PDF")
+            return ""
+            
+        logging.info("Successfully extracted text using OCR")
+        return coa_text
         
     except Exception as e:
-        print(f"Error reading PDF file: {e}")
+        logging.error(f"Error reading PDF file: {e}")
         sys.exit(1)
 
 
@@ -386,20 +562,103 @@ def read_input_file(file_path: str) -> str:
             sys.exit(1)
 
 
+def print_summary_table(results_list: List[Tuple[str, List[TestResult], Dict[str, str]]]):
+    """Print a summary table of all processed PDFs and their results."""
+    print("\nSummary of All Processed COAs:")
+    print("=" * 100)
+    print(f"{'File Name':<30} {'Material':<20} {'Batch':<15} {'Tests':<8} {'Pass':<8} {'Fail':<8}")
+    print("-" * 100)
+    
+    total_tests = 0
+    total_pass = 0
+    total_fail = 0
+    
+    for filename, results, metadata in results_list:
+        # Get just the filename without path
+        base_filename = os.path.basename(filename)
+        
+        # Count results
+        passes = sum(1 for r in results if r.result == "PASS")
+        fails = sum(1 for r in results if r.result == "FAIL")
+        
+        # Get metadata
+        material = metadata.get("Material", "").split()[0] if metadata.get("Material") else "N/A"
+        batch = metadata.get("Batch", "N/A")
+        
+        # Print row
+        print(f"{base_filename[:30]:<30} {material[:20]:<20} {batch[:15]:<15} "
+              f"{len(results):<8} {passes:<8} {fails:<8}")
+        
+        # Update totals
+        total_tests += len(results)
+        total_pass += passes
+        total_fail += fails
+    
+    print("-" * 100)
+    print(f"{'TOTAL':<30} {'':<20} {'':<15} {total_tests:<8} {total_pass:<8} {total_fail:<8}")
+    print("=" * 100)
+
+
 def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Certificate of Analysis (COA) Analyzer')
     parser.add_argument('-i', '--input', help='Input file containing COA text (txt or pdf)', required=False)
     parser.add_argument('-o', '--output', help='Output CSV file for results', required=False)
     parser.add_argument('-v', '--visualize', help='Show ASCII visualization of results', action='store_true')
+    parser.add_argument('-d', '--debug', help='Enable debug logging', action='store_true')
+    parser.add_argument('-b', '--batch', help='Process all PDFs in a directory', action='store_true')
     args = parser.parse_args()
     
-    # Get COA text from file or use sample
-    if args.input:
-        coa_text = read_input_file(args.input)
+    # Set logging level based on debug flag
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+    
+    all_results = []
+    
+    if args.batch:
+        # Process all PDFs in the directory of the input file
+        input_dir = args.input if args.input else "."
+        if not os.path.isdir(input_dir):
+            logging.error(f"Input directory not found: {input_dir}")
+            sys.exit(1)
+            
+        for filename in os.listdir(input_dir):
+            if filename.lower().endswith('.pdf'):
+                filepath = os.path.join(input_dir, filename)
+                logging.info(f"\nProcessing {filename}...")
+                
+                # Process the file
+                coa_text = read_input_file(filepath)
+                if not coa_text.strip():
+                    logging.error(f"No COA data found in {filename}")
+                    continue
+                
+                # Extract data
+                results = extract_coa_data(coa_text)
+                metadata = extract_metadata(coa_text)
+                
+                # Save results if output specified
+                if args.output:
+                    output_file = f"{os.path.splitext(filepath)[0]}_results.csv"
+                    save_to_csv(results, metadata, output_file)
+                    logging.info(f"Results saved to {output_file}")
+                
+                all_results.append((filepath, results, metadata))
+        
+        # Print summary table
+        if all_results:
+            print_summary_table(all_results)
+    
     else:
-        # Use sample COA text
-        coa_text = """
+        # Process single file
+        if args.input:
+            coa_text = read_input_file(args.input)
+            if not coa_text.strip():
+                logging.error("No COA data found in the input file")
+                sys.exit(1)
+        else:
+            # Use sample COA text
+            coa_text = """
 Material: D14924998 NEOPRENE GNA M2 CHP 100 ABAG25KG
 Our/Customer Reference No: S030068A
 
@@ -416,21 +675,26 @@ TIME TPOINT90       N200.7405      min.     4.84          2.10 - 7.60
 ML100               N200.5700                53            47 - 59
 ML120               N200.7460      min.     38.04         = > 11.00
 DATE OF PRODUCTION                           20241229
-COUNTRY OF ORIGIN                            US
+COUNTRY OF ORIGIN                           US
 """
-        print("Using sample COA data. Use --input to specify a file.")
-    
-    # Extract data
-    results = extract_coa_data(coa_text)
-    metadata = extract_metadata(coa_text)
-    
-    # Print results
-    print_results(results, metadata, show_ascii_viz=args.visualize)
-    
-    # Save to CSV if output file specified
-    if args.output:
-        save_to_csv(results, metadata, args.output)
-        print(f"\nResults saved to {args.output}")
+            logging.info("Using sample COA data. Use --input to specify a file.")
+        
+        # Extract data
+        results = extract_coa_data(coa_text)
+        metadata = extract_metadata(coa_text)
+        
+        # Print results
+        print_results(results, metadata, show_ascii_viz=args.visualize)
+        
+        # Save to CSV if output file specified
+        if args.output:
+            save_to_csv(results, metadata, args.output)
+            logging.info(f"Results saved to {args.output}")
+        
+        all_results.append((args.input or "sample", results, metadata))
+        
+        # Print summary table
+        print_summary_table(all_results)
 
 
 if __name__ == "__main__":
