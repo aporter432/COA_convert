@@ -585,10 +585,12 @@ def is_coa_page(text: str) -> bool:
 def read_pdf_file(file_path: str) -> str:
     """Extract text from a PDF file."""
     logger.debug(f"Starting PDF processing for: {file_path}")
+    reader = None
+    coa_text = ""
+    
     try:
         # First try regular text extraction
         reader = PyPDF2.PdfReader(file_path)
-        coa_text = ""
         
         # Process each page
         for page in reader.pages:
@@ -597,36 +599,70 @@ def read_pdf_file(file_path: str) -> str:
                 coa_text += text + "\n\n"
         
         if coa_text.strip():
+            logger.debug("Successfully extracted text from PDF")
+            # Explicitly close and release PDF resources
+            reader = None
             return coa_text
         
         # If no text was extracted, try OCR
         logger.debug("No text found in PDF, attempting OCR...")
-        try:
-            import tempfile
-            with tempfile.TemporaryDirectory() as path:
+        import tempfile
+        with tempfile.TemporaryDirectory() as path:
+            try:
+                # Convert PDF to images
                 images = pdf2image.convert_from_path(file_path)
-                coa_text = ""
+                ocr_text = ""
                 
+                # Process each image with OCR
                 for i, image in enumerate(images):
                     temp_file = os.path.join(path, f'page_{i}.png')
-                    image.save(temp_file, 'PNG')
-                    page_text = pytesseract.image_to_string(temp_file)
-                    
-                    if is_coa_page(page_text):
-                        coa_text += page_text + "\n\n"
-            
-            if coa_text.strip():
-                return coa_text
-            else:
+                    try:
+                        # Save image to temp file
+                        image.save(temp_file, 'PNG')
+                        # Process with OCR
+                        page_text = pytesseract.image_to_string(temp_file)
+                        
+                        if is_coa_page(page_text):
+                            ocr_text += page_text + "\n\n"
+                            
+                        # Explicitly delete the image from memory after processing
+                        del page_text
+                        # Explicitly remove temp file after processing
+                        if os.path.exists(temp_file):
+                            try:
+                                os.remove(temp_file)
+                            except:
+                                pass
+                    except Exception as e:
+                        logger.error(f"Error processing page {i}: {e}")
+                    finally:
+                        # Make sure image is released
+                        image = None
+                
+                # Release all images
+                del images
+                
+                # Return OCR text if any was found
+                if ocr_text.strip():
+                    return ocr_text
+                else:
+                    logger.warning("OCR completed but no text was extracted")
+                    return ""
+            except Exception as e:
+                logger.error(f"OCR processing failed: {e}")
                 return ""
-            
-        except Exception as e:
-            logger.error(f"OCR processing failed: {e}")
-            return ""
-            
+            finally:
+                # Extra cleanup to ensure tempdir gets cleared
+                import gc
+                gc.collect()
     except Exception as e:
         logger.error(f"Error reading PDF file: {e}")
         return ""
+    finally:
+        # Final cleanup
+        reader = None
+        import gc
+        gc.collect()
 
 
 def read_input_file(file_path: str) -> str:
