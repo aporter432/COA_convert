@@ -3,31 +3,30 @@
 import csv
 import os
 import sys
+import logging
+try:
+    import PyPDF2
+except ImportError:
+    print("Error: PyPDF2 package not found. Please install it using 'pip install PyPDF2'")
+    sys.exit(1)
 from typing import Dict, List
 
 from .core import TestResult
 
+logger = logging.getLogger(__name__)
+
 
 def read_pdf_file(file_path: str) -> str:
-    """Extract text from a PDF file."""
+    """Read text from a PDF file."""
     try:
-        # Only import PyPDF2 when needed
-        from PyPDF2 import PdfReader
-    except ImportError:
-        print("Error: PyPDF2 library is required for PDF support.")
-        print("Install it using: pip install PyPDF2")
-        sys.exit(1)
-    
-    text = ""
-    try:
-        reader = PdfReader(file_path)
+        reader = PyPDF2.PdfReader(file_path)
+        text = ""
         for page in reader.pages:
             text += page.extract_text()
+        return text
     except Exception as e:
-        print(f"Error reading PDF file: {e}")
-        sys.exit(1)
-    
-    return text
+        logger.error(f"Error reading PDF file: {e}")
+        return ""
 
 
 def read_input_file(file_path: str) -> str:

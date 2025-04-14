@@ -1,0 +1,17 @@
+{
+    "include": [
+        "coa_analyzer"
+    ],
+    "exclude": [
+        ".venv",
+        "build",
+        "dist"
+    ],
+    "venvPath": ".",
+    "venv": ".venv",
+    "useLibraryCodeForTypes": true,
+    "typeCheckingMode": "basic",
+    "reportMissingImports": "warning",
+    "reportMissingTypeStubs": "none",
+    "reportInvalidTypeVarUse": "warning"
+} 

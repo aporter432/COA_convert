@@ -7,15 +7,37 @@ import logging
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict
 
+# Third-party imports
+try:
+    import PyPDF2
+except ImportError:
+    print("Error: PyPDF2 package not found. Please install it using 'pip install PyPDF2'")
+    sys.exit(1)
+
+try:
+    import pdf2image
+except ImportError:
+    print("Error: pdf2image package not found. Please install it using 'pip install pdf2image'")
+    sys.exit(1)
+
+try:
+    import pytesseract
+except ImportError:
+    print("Error: pytesseract package not found. Please install it using 'pip install pytesseract'")
+    sys.exit(1)
+
+from logging.handlers import RotatingFileHandler
+
 # Set up logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('coa_processing.log')
+        logging.FileHandler('coa_processing.log', mode='w')
     ]
 )
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -54,270 +76,355 @@ def parse_specification(spec_str: str) -> Tuple[Optional[float], Optional[float]
 
 def evaluate_result(value_str: str, spec_str: str) -> str:
     """Evaluate if a value passes the specification."""
+    if not value_str or not spec_str:
+        return "UNKNOWN"  # Can't evaluate without value or specification
+        
     try:
+        # Clean and normalize value string
+        value_str = value_str.strip().replace(',', '')
         value = float(value_str)
-    except ValueError:
+    except (ValueError, TypeError) as e:
+        logger.debug(f"Could not convert value '{value_str}' to float: {str(e)}")
         return "UNKNOWN"  # Non-numeric values can't be evaluated
     
-    min_val, max_val = parse_specification(spec_str)
-    
-    if min_val is not None and value < min_val:
-        return "FAIL"
-    if max_val is not None and value > max_val:
-        return "FAIL"
-    if (min_val is None and max_val is None):
-        return "UNKNOWN"  # Can't evaluate without specification
+    try:
+        min_val, max_val = parse_specification(spec_str)
+        
+        if min_val is not None and value < min_val:
+            return "FAIL"
+        if max_val is not None and value > max_val:
+            return "FAIL"
+        if (min_val is None and max_val is None):
+            logger.debug(f"Specification '{spec_str}' could not be parsed into min/max values")
+            return "UNKNOWN"  # Can't evaluate without specification
+    except Exception as e:
+        logger.error(f"Error evaluating result for value '{value_str}' with spec '{spec_str}': {str(e)}", exc_info=True)
+        return "UNKNOWN"
     
     return "PASS"
 
 
 def extract_coa_data(raw_text: str) -> List[TestResult]:
     """Extract test data from COA text."""
-    lines = raw_text.strip().split('\n')
-    results = []
-    seen_test_results = set()  # Track unique test results
-    
-    # Find all COA sections
-    coa_sections = []
-    start_idx = -1
-    
-    for i, line in enumerate(lines):
-        if "CERTIFICATE OF ANALYSIS" in line:
-            if start_idx != -1:
-                coa_sections.append((start_idx, i))
-            start_idx = i
-    
-    if start_idx != -1:
-        coa_sections.append((start_idx, len(lines)))
-    
-    if not coa_sections:
+    if not raw_text:
+        logger.warning("Empty text provided to extract_coa_data")
         return []
-    
-    # Process each COA section
-    for start_idx, end_idx in coa_sections:
-        section_lines = lines[start_idx:end_idx]
         
-        # Find the test results section
-        test_names = []
-        test_methods = []
-        units = []
-        values = []
-        specs = []
+    try:
+        lines = raw_text.strip().split('\n')
+        results = []
+        seen_test_results = set()  # Track unique test results
         
-        # Current section being read
-        current_section = None
+        # Safety check for very large input
+        if len(lines) > 10000:
+            logger.warning(f"Input text is very large ({len(lines)} lines), truncating to first 10000 lines")
+            lines = lines[:10000]
         
-        # Process lines in this COA section
-        for line in section_lines:
-            line = line.strip()
-            if not line:
-                continue
-                
-            # Skip metadata lines
-            if any(x in line for x in ["Batch", "Qty /Uom", "Material:", "Our/Customer Reference", "Page", "THE PRODUCT"]):
-                continue
-                
-            # Check for section headers
-            if "Test Name" in line:
-                current_section = "names"
-                continue
-            elif "Test Method" in line:
-                current_section = "methods"
-                continue
-            elif "Unit" in line:
-                current_section = "units"
-                continue
-            elif "Value" in line:
-                current_section = "values"
-                continue
-            elif "Specification" in line:
-                current_section = "specs"
-                continue
-                
-            # Add data to appropriate list if it looks valid
-            if current_section == "names" and re.match(r'^[A-Za-z0-9\']+', line):
-                if line not in ["DATE OF PRODUCTION", "COUNTRY OF ORIGIN"]:
-                    test_names.append(line)
-            elif current_section == "methods" and re.match(r'^N200\.\d+', line):
-                test_methods.append(line)
-            elif current_section == "units" and line in ["dNm", "min.", "%", "min"]:
-                units.append(line)
-            elif current_section == "values" and re.match(r'^\d+\.?\d*$', line):
-                values.append(line)
-            elif current_section == "specs" and ("=" in line or "-" in line or any(x in line for x in ["<", ">"])):
-                specs.append(line)
+        # Find all COA sections
+        coa_sections = []
+        start_idx = -1
         
-        # Create test results from the collected data
-        for i in range(len(test_names)):
-            name = test_names[i]
-            method = test_methods[i] if i < len(test_methods) else ""
-            unit = units[i] if i < len(units) else ""
-            value = values[i] if i < len(values) else ""
-            spec = specs[i] if i < len(specs) else ""
+        for i, line in enumerate(lines):
+            if "CERTIFICATE OF ANALYSIS" in line:
+                if start_idx != -1:
+                    coa_sections.append((start_idx, i))
+                start_idx = i
+        
+        if start_idx != -1:
+            coa_sections.append((start_idx, len(lines)))
+        
+        if not coa_sections:
+            logger.warning("No 'CERTIFICATE OF ANALYSIS' header found in text")
+            # Try to process the whole text as one section
+            coa_sections = [(0, len(lines))]
+        
+        # Process each COA section
+        for start_idx, end_idx in coa_sections:
+            section_lines = lines[start_idx:end_idx]
             
-            # Skip non-test entries
-            if name in ["DATE OF PRODUCTION", "COUNTRY OF ORIGIN"]:
-                continue
-                
-            # Handle special cases
-            if name == "ML100" and not unit:
-                unit = ""  # ML100 typically has no unit
+            # Find the test results section
+            test_names = []
+            test_methods = []
+            units = []
+            values = []
+            specs = []
             
-            # Create unique key for this test result
-            result_key = f"{name}_{method}_{value}_{spec}"
-            if result_key in seen_test_results:
-                continue
+            # Current section being read
+            current_section = None
             
-            seen_test_results.add(result_key)
-            result = evaluate_result(value, spec)
+            # Process lines in this COA section
+            for line in section_lines:
+                try:
+                    line = line.strip()
+                    if not line:
+                        continue
+                        
+                    # Skip metadata lines
+                    if any(x in line for x in ["Batch", "Qty /Uom", "Material:", "Our/Customer Reference", "Page", "THE PRODUCT"]):
+                        continue
+                        
+                    # Check for section headers
+                    if "Test Name" in line:
+                        current_section = "names"
+                        continue
+                    elif "Test Method" in line:
+                        current_section = "methods"
+                        continue
+                    elif "Unit" in line:
+                        current_section = "units"
+                        continue
+                    elif "Value" in line:
+                        current_section = "values"
+                        continue
+                    elif "Specification" in line:
+                        current_section = "specs"
+                        continue
+                        
+                    # Add data to appropriate list if it looks valid
+                    if current_section == "names" and re.match(r'^[A-Za-z0-9\']+', line):
+                        if line not in ["DATE OF PRODUCTION", "COUNTRY OF ORIGIN"]:
+                            test_names.append(line)
+                    elif current_section == "methods" and re.match(r'^N200\.\d+', line):
+                        test_methods.append(line)
+                    elif current_section == "units" and line in ["dNm", "min.", "%", "min"]:
+                        units.append(line)
+                    elif current_section == "values" and re.match(r'^\d+\.?\d*$', line):
+                        values.append(line)
+                    elif current_section == "specs" and ("=" in line or "-" in line or any(x in line for x in ["<", ">"])):
+                        specs.append(line)
+                except Exception as line_error:
+                    logger.error(f"Error processing line '{line}': {str(line_error)}")
+                    continue
             
-            results.append(TestResult(
-                name=name,
-                method=method,
-                unit=unit,
-                value=value,
-                specification=spec,
-                result=result
-            ))
-    
-    return results
+            # Create test results from the collected data
+            for i in range(len(test_names)):
+                try:
+                    name = test_names[i]
+                    method = test_methods[i] if i < len(test_methods) else ""
+                    unit = units[i] if i < len(units) else ""
+                    value = values[i] if i < len(values) else ""
+                    spec = specs[i] if i < len(specs) else ""
+                    
+                    # Skip non-test entries
+                    if name in ["DATE OF PRODUCTION", "COUNTRY OF ORIGIN"]:
+                        continue
+                        
+                    # Handle special cases
+                    if name == "ML100" and not unit:
+                        unit = ""  # ML100 typically has no unit
+                    
+                    # Create unique key for this test result
+                    result_key = f"{name}_{method}_{value}_{spec}"
+                    if result_key in seen_test_results:
+                        continue
+                    
+                    seen_test_results.add(result_key)
+                    result = evaluate_result(value, spec)
+                    
+                    results.append(TestResult(
+                        name=name,
+                        method=method,
+                        unit=unit,
+                        value=value,
+                        specification=spec,
+                        result=result
+                    ))
+                except Exception as result_error:
+                    logger.error(f"Error creating test result at index {i}: {str(result_error)}")
+                    continue
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Error in extract_coa_data: {str(e)}", exc_info=True)
+        return []
 
 
 def extract_metadata(raw_text: str) -> Dict[str, str]:
     """Extract metadata from the COA text."""
-    metadata = {}
-    lines = raw_text.strip().split('\n')
-    
-    # Extract material information
-    material_pattern = re.compile(r'Material:?\s*([A-Z0-9]+\s+[A-Z0-9\s]+(?:CHP|GRT|GNA)\s+[A-Z0-9\s]+)')
-    reference_pattern = re.compile(r'(?:Reference No:|CPN:|Sales Order No\.|Order No\.?)\s*([A-Z0-9]+)')
-    
-    # Enhanced batch pattern to handle more formats
-    batch_patterns = [
-        re.compile(r'(?:Batch|Lot|Batch No\.?|Batch Number)\s*[:.]?\s*([0-9A-Z]+(?:[A-Z][0-9]+)?)', re.IGNORECASE),
-        re.compile(r'(?:Batch|Lot)\s*ID\s*[:.]?\s*([0-9A-Z]+(?:[A-Z][0-9]+)?)', re.IGNORECASE),
-        re.compile(r'^\s*([0-9]{6}[A-Z][0-9]{3})\s*$'),  # Format like: 241226D257
-        re.compile(r'(?:Batch|Lot)\s*#\s*[:.]?\s*([0-9A-Z]+(?:[A-Z][0-9]+)?)', re.IGNORECASE),
-        re.compile(r'(?:Batch|Lot)\s*:\s*([0-9A-Z]+(?:[A-Z][0-9]+)?)', re.IGNORECASE),
-        re.compile(r'(?:Batch|Lot)\s*=\s*([0-9A-Z]+(?:[A-Z][0-9]+)?)', re.IGNORECASE),
-        re.compile(r'Batch\s+([0-9]{6}[A-Z][0-9]{3})\s+[0-9,]+\s*/LB', re.IGNORECASE),  # Format from delivery note
-        re.compile(r'Batch\s+([0-9]{6}[A-Z][0-9]{3})', re.IGNORECASE),  # Simpler delivery note format
-        re.compile(r'Batch\s*\n\s*([0-9]{6}[A-Z][0-9]{3})', re.IGNORECASE),  # Format with newline
-        re.compile(r'Batch\s*\n\s*([0-9A-Z]+)', re.IGNORECASE),  # Generic format with newline
-        re.compile(r'(?:Batch|Lot)\s*\n\s*([0-9]{6}[A-Z][0-9]{3})\s*\n', re.IGNORECASE),  # OCR format with newlines
-        re.compile(r'(?:Batch|Lot)\s*\n\s*([0-9A-Z]+)\s*\n', re.IGNORECASE),  # Generic OCR format with newlines
-        re.compile(r'(?:Batch|Lot)\s*\n([0-9]{6}[A-Z][0-9]{3})', re.IGNORECASE),  # OCR format with single newline
-        re.compile(r'(?:Batch|Lot)\s*\n([0-9A-Z]+)', re.IGNORECASE)  # Generic OCR format with single newline
-    ]
-    
-    batch_found = False
-    logging.debug("Starting metadata extraction...")
-    logging.debug(f"Total lines to process: {len(lines)}")
-    logging.debug("Raw text content:")
-    logging.debug("-" * 80)
-    logging.debug(raw_text)
-    logging.debug("-" * 80)
-    
-    # First pass: look for batch number in standard format
-    for i, line in enumerate(lines):
-        logging.debug(f"\nProcessing line {i}: '{line}'")
+    if not raw_text:
+        logger.warning("Empty text provided to extract_metadata")
+        return {"Batch": "N/A"}
         
-        # Look for material info
-        if material_match := material_pattern.search(line):
-            metadata["Material"] = material_match.group(1).strip()
-            logging.debug(f"Found material: {metadata['Material']}")
-            continue
+    try:
+        metadata = {}
+        lines = raw_text.strip().split('\n')
         
-        # Look for reference number
-        if reference_match := reference_pattern.search(line):
-            metadata["Reference"] = reference_match.group(1).strip()
-            logging.debug(f"Found reference: {metadata['Reference']}")
-            continue
+        # Safety check for very large input
+        if len(lines) > 10000:
+            logger.warning(f"Input text is very large ({len(lines)} lines), truncating to first 10000 lines")
+            lines = lines[:10000]
         
-        # Try all batch patterns
-        if not batch_found:
-            # Try single line patterns
-            for pattern_idx, pattern in enumerate(batch_patterns):
-                if batch_match := pattern.search(line):
-                    metadata["Batch"] = batch_match.group(1).strip()
-                    batch_found = True
-                    logging.debug(f"Found batch number using pattern {pattern_idx}: {metadata['Batch']}")
-                    logging.debug(f"Pattern used: {pattern.pattern}")
-                    break
-            
-            # Try multi-line patterns if we're not at the last line
-            if not batch_found and i < len(lines) - 2:
-                three_lines = '\n'.join(lines[i:i+3])
-                logging.debug(f"Trying multi-line pattern with lines:\n{three_lines}")
-                for pattern_idx, pattern in enumerate(batch_patterns):
-                    if batch_match := pattern.search(three_lines):
-                        metadata["Batch"] = batch_match.group(1).strip()
-                        batch_found = True
-                        logging.debug(f"Found batch number using multi-line pattern {pattern_idx}: {metadata['Batch']}")
-                        logging.debug(f"Pattern used: {pattern.pattern}")
-                        break
-            
-            if batch_found:
+        # Extract material information
+        try:
+            material_pattern = re.compile(r'Material:?\s*([A-Z0-9]+\s+[A-Z0-9\s]+(?:CHP|GRT|GNA)\s+[A-Z0-9\s]+)')
+            reference_pattern = re.compile(r'(?:Reference No:|CPN:|Sales Order No\.|Order No\.?)\s*([A-Z0-9]+)')
+        except re.error as pattern_error:
+            logger.error(f"Error compiling regex pattern: {str(pattern_error)}")
+            material_pattern = re.compile(r'Material:?\s*(\S+)')
+            reference_pattern = re.compile(r'Reference No:\s*(\S+)')
+        
+        # Enhanced batch pattern to handle more formats - compile with error handling
+        batch_patterns = []
+        try:
+            batch_patterns = [
+                re.compile(r'(?:Batch|Lot|Batch No\.?|Batch Number)\s*[:.]?\s*([0-9A-Z]+(?:[A-Z][0-9]+)?)', re.IGNORECASE),
+                re.compile(r'(?:Batch|Lot)\s*ID\s*[:.]?\s*([0-9A-Z]+(?:[A-Z][0-9]+)?)', re.IGNORECASE),
+                re.compile(r'^\s*([0-9]{6}[A-Z][0-9]{3})\s*$'),  # Format like: 241226D257
+                re.compile(r'(?:Batch|Lot)\s*#\s*[:.]?\s*([0-9A-Z]+(?:[A-Z][0-9]+)?)', re.IGNORECASE),
+                re.compile(r'(?:Batch|Lot)\s*:\s*([0-9A-Z]+(?:[A-Z][0-9]+)?)', re.IGNORECASE),
+                re.compile(r'(?:Batch|Lot)\s*=\s*([0-9A-Z]+(?:[A-Z][0-9]+)?)', re.IGNORECASE),
+                re.compile(r'Batch\s+([0-9]{6}[A-Z][0-9]{3})\s+[0-9,]+\s*/LB', re.IGNORECASE),  # Format from delivery note
+                re.compile(r'Batch\s+([0-9]{6}[A-Z][0-9]{3})', re.IGNORECASE),  # Simpler delivery note format
+                re.compile(r'Batch\s*\n\s*([0-9]{6}[A-Z][0-9]{3})', re.IGNORECASE),  # Format with newline
+                re.compile(r'Batch\s*\n\s*([0-9A-Z]+)', re.IGNORECASE),  # Generic format with newline
+                re.compile(r'(?:Batch|Lot)\s*\n\s*([0-9]{6}[A-Z][0-9]{3})\s*\n', re.IGNORECASE),  # OCR format with newlines
+                re.compile(r'(?:Batch|Lot)\s*\n\s*([0-9A-Z]+)\s*\n', re.IGNORECASE),  # Generic OCR format with newlines
+                re.compile(r'(?:Batch|Lot)\s*\n([0-9]{6}[A-Z][0-9]{3})', re.IGNORECASE),  # OCR format with single newline
+                re.compile(r'(?:Batch|Lot)\s*\n([0-9A-Z]+)', re.IGNORECASE)  # Generic OCR format with single newline
+            ]
+        except re.error as pattern_error:
+            logger.error(f"Error compiling batch pattern: {str(pattern_error)}")
+            # Use simpler patterns as fallback
+            batch_patterns = [
+                re.compile(r'Batch\s*[:.]?\s*([0-9A-Z]+)', re.IGNORECASE),
+                re.compile(r'Lot\s*[:.]?\s*([0-9A-Z]+)', re.IGNORECASE)
+            ]
+        
+        batch_found = False
+        logger.debug("Starting metadata extraction...")
+        logger.debug(f"Total lines to process: {len(lines)}")
+        
+        # First pass: look for batch number in standard format
+        for i, line in enumerate(lines):
+            try:
+                logger.debug(f"\nProcessing line {i}: '{line}'")
+                
+                # Look for material info
+                if material_match := material_pattern.search(line):
+                    metadata["Material"] = material_match.group(1).strip()
+                    logger.debug(f"Found material: {metadata['Material']}")
+                    continue
+                
+                # Look for reference number
+                if reference_match := reference_pattern.search(line):
+                    metadata["Reference"] = reference_match.group(1).strip()
+                    logger.debug(f"Found reference: {metadata['Reference']}")
+                    continue
+                
+                # Try all batch patterns
+                if not batch_found:
+                    # Try single line patterns
+                    for pattern_idx, pattern in enumerate(batch_patterns):
+                        try:
+                            if batch_match := pattern.search(line):
+                                metadata["Batch"] = batch_match.group(1).strip()
+                                batch_found = True
+                                logger.debug(f"Found batch number using pattern {pattern_idx}: {metadata['Batch']}")
+                                logger.debug(f"Pattern used: {pattern.pattern}")
+                                break
+                        except (re.error, IndexError) as e:
+                            logger.error(f"Error using pattern {pattern_idx}: {str(e)}")
+                            continue
+                    
+                    # Try multi-line patterns if we're not at the last line
+                    if not batch_found and i < len(lines) - 2:
+                        try:
+                            three_lines = '\n'.join(lines[i:i+3])
+                            logger.debug(f"Trying multi-line pattern with lines:\n{three_lines}")
+                            for pattern_idx, pattern in enumerate(batch_patterns):
+                                try:
+                                    if batch_match := pattern.search(three_lines):
+                                        metadata["Batch"] = batch_match.group(1).strip()
+                                        batch_found = True
+                                        logger.debug(f"Found batch number using multi-line pattern {pattern_idx}: {metadata['Batch']}")
+                                        logger.debug(f"Pattern used: {pattern.pattern}")
+                                        break
+                                except (re.error, IndexError) as e:
+                                    logger.error(f"Error using multi-line pattern {pattern_idx}: {str(e)}")
+                                    continue
+                        except Exception as e:
+                            logger.error(f"Error processing multi-line pattern: {str(e)}")
+                    
+                    if batch_found:
+                        continue
+                
+                # Look for production date and country
+                if "DATE OF PRODUCTION" in line:
+                    parts = re.split(r'\s{2,}', line)
+                    if len(parts) > 1:
+                        metadata["Production Date"] = parts[-1].strip()
+                        logger.debug(f"Found production date: {metadata['Production Date']}")
+                    continue
+                
+                if "COUNTRY OF ORIGIN" in line:
+                    parts = re.split(r'\s{2,}', line)
+                    if len(parts) > 1:
+                        metadata["Country"] = parts[-1].strip()
+                        logger.debug(f"Found country: {metadata['Country']}")
+            except Exception as line_error:
+                logger.error(f"Error processing line {i}: {str(line_error)}")
                 continue
         
-        # Look for production date and country
-        if "DATE OF PRODUCTION" in line:
-            parts = re.split(r'\s{2,}', line)
-            if len(parts) > 1:
-                metadata["Production Date"] = parts[-1].strip()
-                logging.debug(f"Found production date: {metadata['Production Date']}")
-            continue
+        # Second pass: if no batch found, look for standalone batch number
+        if "Batch" not in metadata:
+            try:
+                logger.debug("\nNo batch found in first pass, trying second pass...")
+                batch_idx = -1
+                qty_idx = -1
+                
+                for i, line in enumerate(lines):
+                    try:
+                        line_upper = line.upper()
+                        if any(x in line_upper for x in ["BATCH", "LOT"]):
+                            batch_idx = i
+                            logger.debug(f"Found batch header at line {i}: '{line}'")
+                            # Check the next line for a batch number
+                            if i + 1 < len(lines):
+                                next_line = lines[i + 1].strip()
+                                logger.debug(f"Checking next line for batch number: '{next_line}'")
+                                if re.match(r'^[0-9]{6}[A-Z][0-9]{3}$', next_line):
+                                    metadata["Batch"] = next_line
+                                    batch_found = True
+                                    logger.debug(f"Found batch number in next line: {metadata['Batch']}")
+                                    break
+                        elif "QTY" in line_upper:
+                            qty_idx = i
+                            logger.debug(f"Found qty header at line {i}: '{line}'")
+                            break
+                    except Exception as line_error:
+                        logger.error(f"Error in second pass line {i}: {str(line_error)}")
+                        continue
+                
+                if not batch_found and batch_idx != -1 and qty_idx != -1:
+                    logger.debug(f"\nLooking between lines {batch_idx+1} and {qty_idx}")
+                    # Look at lines between batch and qty
+                    for line in lines[batch_idx+1:qty_idx]:
+                        try:
+                            line = line.strip()
+                            logger.debug(f"Checking line between batch and qty: '{line}'")
+                            if re.match(r'^[0-9A-Z]+(?:[A-Z][0-9]+)?$', line):
+                                metadata["Batch"] = line
+                                batch_found = True
+                                logger.debug(f"Found standalone batch number: {metadata['Batch']}")
+                                break
+                        except Exception as e:
+                            logger.error(f"Error checking batch-qty line: {str(e)}")
+                            continue
+            except Exception as second_pass_error:
+                logger.error(f"Error in second pass: {str(second_pass_error)}")
         
-        if "COUNTRY OF ORIGIN" in line:
-            parts = re.split(r'\s{2,}', line)
-            if len(parts) > 1:
-                metadata["Country"] = parts[-1].strip()
-                logging.debug(f"Found country: {metadata['Country']}")
-    
-    # Second pass: if no batch found, look for standalone batch number
-    if "Batch" not in metadata:
-        logging.debug("\nNo batch found in first pass, trying second pass...")
-        batch_idx = -1
-        qty_idx = -1
+        if "Batch" not in metadata:
+            logger.warning("No batch number found in the document")
+            metadata["Batch"] = "N/A"  # Set default value if no batch number found
+        else:
+            logger.info(f"Successfully extracted batch number: {metadata['Batch']}")
         
-        for i, line in enumerate(lines):
-            line_upper = line.upper()
-            if any(x in line_upper for x in ["BATCH", "LOT"]):
-                batch_idx = i
-                logging.debug(f"Found batch header at line {i}: '{line}'")
-                # Check the next line for a batch number
-                if i + 1 < len(lines):
-                    next_line = lines[i + 1].strip()
-                    logging.debug(f"Checking next line for batch number: '{next_line}'")
-                    if re.match(r'^[0-9]{6}[A-Z][0-9]{3}$', next_line):
-                        metadata["Batch"] = next_line
-                        batch_found = True
-                        logging.debug(f"Found batch number in next line: {metadata['Batch']}")
-                        break
-            elif "QTY" in line_upper:
-                qty_idx = i
-                logging.debug(f"Found qty header at line {i}: '{line}'")
-                break
+        return metadata
         
-        if not batch_found and batch_idx != -1 and qty_idx != -1:
-            logging.debug(f"\nLooking between lines {batch_idx+1} and {qty_idx}")
-            # Look at lines between batch and qty
-            for line in lines[batch_idx+1:qty_idx]:
-                line = line.strip()
-                logging.debug(f"Checking line between batch and qty: '{line}'")
-                if re.match(r'^[0-9A-Z]+(?:[A-Z][0-9]+)?$', line):
-                    metadata["Batch"] = line
-                    batch_found = True
-                    logging.debug(f"Found standalone batch number: {metadata['Batch']}")
-                    break
-    
-    if "Batch" not in metadata:
-        logging.warning("No batch number found in the document")
-        metadata["Batch"] = "N/A"  # Set default value if no batch number found
-    else:
-        logging.info(f"Successfully extracted batch number: {metadata['Batch']}")
-    
-    return metadata
+    except Exception as e:
+        logger.error(f"Error in extract_metadata: {str(e)}", exc_info=True)
+        return {"Batch": "N/A"}
 
 
 def print_results(results: List[TestResult], metadata: Dict[str, str], show_ascii_viz: bool = False):
@@ -477,72 +584,49 @@ def is_coa_page(text: str) -> bool:
 
 def read_pdf_file(file_path: str) -> str:
     """Extract text from a PDF file."""
+    logger.debug(f"Starting PDF processing for: {file_path}")
     try:
         # First try regular text extraction
-        from PyPDF2 import PdfReader
-        reader = PdfReader(file_path)
+        reader = PyPDF2.PdfReader(file_path)
         coa_text = ""
         
-        logging.info(f"Processing PDF: {file_path}")
-        logging.info(f"Total pages: {len(reader.pages)}")
-        
         # Process each page
-        for i, page in enumerate(reader.pages):
+        for page in reader.pages:
             text = page.extract_text()
-            
-            # Check if this is a COA page
             if is_coa_page(text):
-                logging.info(f"Found COA data on page {i+1}")
-                coa_text += text
-                coa_text += "\n\n"  # Add spacing between pages
+                coa_text += text + "\n\n"
         
-        # If we got text, return it
         if coa_text.strip():
-            logging.info("Successfully extracted text from PDF")
             return coa_text
         
         # If no text was extracted, try OCR
-        logging.info("No text found in PDF, attempting OCR...")
-        from pdf2image import convert_from_path
-        import pytesseract
-        import tempfile
-        
-        # Convert PDF to images
-        with tempfile.TemporaryDirectory() as path:
-            images = convert_from_path(file_path)
-            coa_text = ""
+        logger.debug("No text found in PDF, attempting OCR...")
+        try:
+            import tempfile
+            with tempfile.TemporaryDirectory() as path:
+                images = pdf2image.convert_from_path(file_path)
+                coa_text = ""
+                
+                for i, image in enumerate(images):
+                    temp_file = os.path.join(path, f'page_{i}.png')
+                    image.save(temp_file, 'PNG')
+                    page_text = pytesseract.image_to_string(temp_file)
+                    
+                    if is_coa_page(page_text):
+                        coa_text += page_text + "\n\n"
             
-            # Process each page
-            for i, image in enumerate(images):
-                # Save the image temporarily
-                temp_file = os.path.join(path, f'page_{i}.png')
-                image.save(temp_file, 'PNG')
-                
-                # Extract text using OCR
-                page_text = pytesseract.image_to_string(temp_file)
-                
-                # Check if this is a COA page
-                if is_coa_page(page_text):
-                    logging.info(f"Found COA data on page {i+1} using OCR")
-                    coa_text += page_text
-                    coa_text += "\n\n"  # Add spacing between pages
-                
-                # Debug output
-                logging.debug(f"\nOCR Output for page {i+1}:")
-                logging.debug("-" * 80)
-                logging.debug(page_text)
-                logging.debug("-" * 80)
-        
-        if not coa_text.strip():
-            logging.warning("No COA data found in the PDF")
+            if coa_text.strip():
+                return coa_text
+            else:
+                return ""
+            
+        except Exception as e:
+            logger.error(f"OCR processing failed: {e}")
             return ""
             
-        logging.info("Successfully extracted text using OCR")
-        return coa_text
-        
     except Exception as e:
-        logging.error(f"Error reading PDF file: {e}")
-        sys.exit(1)
+        logger.error(f"Error reading PDF file: {e}")
+        return ""
 
 
 def read_input_file(file_path: str) -> str:
@@ -619,18 +703,18 @@ def main():
         # Process all PDFs in the directory of the input file
         input_dir = args.input if args.input else "."
         if not os.path.isdir(input_dir):
-            logging.error(f"Input directory not found: {input_dir}")
+            logger.error(f"Input directory not found: {input_dir}")
             sys.exit(1)
             
         for filename in os.listdir(input_dir):
             if filename.lower().endswith('.pdf'):
                 filepath = os.path.join(input_dir, filename)
-                logging.info(f"\nProcessing {filename}...")
+                logger.info(f"\nProcessing {filename}...")
                 
                 # Process the file
                 coa_text = read_input_file(filepath)
                 if not coa_text.strip():
-                    logging.error(f"No COA data found in {filename}")
+                    logger.error(f"No COA data found in {filename}")
                     continue
                 
                 # Extract data
@@ -641,7 +725,7 @@ def main():
                 if args.output:
                     output_file = f"{os.path.splitext(filepath)[0]}_results.csv"
                     save_to_csv(results, metadata, output_file)
-                    logging.info(f"Results saved to {output_file}")
+                    logger.info(f"Results saved to {output_file}")
                 
                 all_results.append((filepath, results, metadata))
         
@@ -654,7 +738,7 @@ def main():
         if args.input:
             coa_text = read_input_file(args.input)
             if not coa_text.strip():
-                logging.error("No COA data found in the input file")
+                logger.error("No COA data found in the input file")
                 sys.exit(1)
         else:
             # Use sample COA text
@@ -677,7 +761,7 @@ ML120               N200.7460      min.     38.04         = > 11.00
 DATE OF PRODUCTION                           20241229
 COUNTRY OF ORIGIN                           US
 """
-            logging.info("Using sample COA data. Use --input to specify a file.")
+            logger.info("Using sample COA data. Use --input to specify a file.")
         
         # Extract data
         results = extract_coa_data(coa_text)
@@ -689,7 +773,7 @@ COUNTRY OF ORIGIN                           US
         # Save to CSV if output file specified
         if args.output:
             save_to_csv(results, metadata, args.output)
-            logging.info(f"Results saved to {args.output}")
+            logger.info(f"Results saved to {args.output}")
         
         all_results.append((args.input or "sample", results, metadata))
         
