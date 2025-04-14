@@ -34681,3 +34681,14 @@ Processing line 145: 'express permission of Denka Performance Elastomer and comp
 2025-04-13 19:30:33,001 - INFO - Found COA data on page 7 using OCR
 2025-04-13 19:30:33,002 - INFO - Successfully extracted text using OCR
 2025-04-13 19:30:33,003 - INFO - Successfully extracted batch number: 241226D256
+2025-04-13 19:47:15,638 - INFO - Processing PDF: /Users/aaronporter/Downloads/Coa pdf/TIMKEN CDH0136353.pdf
+2025-04-13 19:47:15,639 - INFO - Total pages: 12
+2025-04-13 19:47:15,652 - INFO - No text found in PDF, attempting OCR...
+2025-04-13 19:47:21,089 - INFO - Found COA data on page 7 using OCR
+2025-04-13 19:47:21,756 - INFO - Found COA data on page 8 using OCR
+2025-04-13 19:47:22,415 - INFO - Found COA data on page 9 using OCR
+2025-04-13 19:47:23,081 - INFO - Found COA data on page 10 using OCR
+2025-04-13 19:47:23,749 - INFO - Found COA data on page 11 using OCR
+2025-04-13 19:47:24,432 - INFO - Found COA data on page 12 using OCR
+2025-04-13 19:47:24,433 - INFO - Successfully extracted text using OCR
+2025-04-13 19:47:24,436 - INFO - Successfully extracted batch number: 241004D296

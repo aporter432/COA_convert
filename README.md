@@ -15,26 +15,86 @@ A Python utility for extracting and evaluating test results from Certificate of 
 - Provides ASCII visualization of test results
 - Exports results to CSV format
 - Color-coded terminal output
+- Modern GUI interface
 
 ## Installation
 
-### Basic Installation
-The script can run with standard Python libraries for text file processing. No external dependencies are required for basic functionality.
+### For End Users (Windows)
 
-### PDF Support
-To enable PDF support, install the PyPDF2 library:
+1. Download the latest installer (`COA_Analyzer_Setup.exe`) from the releases page
+2. Run the installer
+3. The installer will:
+   - Check system requirements
+   - Install any missing dependencies (Python, Tesseract OCR, Visual C++ Redistributable)
+   - Install the application
+   - Create start menu and desktop shortcuts
 
+System Requirements:
+- Windows 7 SP1 or later
+- 500MB free disk space
+- Internet connection (for dependency installation)
+
+### For Developers
+
+#### Prerequisites
+- Python 3.8 or later
+- Poetry (Python package manager)
+- Tesseract OCR
+- Visual C++ Redistributable
+
+#### Installation Steps
+
+1. Clone the repository:
 ```bash
-# Create a virtual environment (recommended)
-python3 -m venv coa_venv
-source coa_venv/bin/activate  # On Windows: coa_venv\Scripts\activate
-
-# Install PyPDF2
-pip install PyPDF2
+git clone https://github.com/yourusername/coa-analyzer.git
+cd coa-analyzer
 ```
+
+2. Install dependencies using Poetry:
+```bash
+poetry install
+```
+
+3. Install Tesseract OCR:
+   - Windows: Download and install from [UB Mannheim](https://github.com/UB-Mannheim/tesseract/wiki)
+   - macOS: `brew install tesseract`
+   - Linux: `sudo apt install tesseract-ocr`
+
+4. Activate the virtual environment:
+```bash
+poetry shell
+```
+
+5. Run the application:
+```bash
+poetry run coa-analyzer
+```
+
+### Building from Source
+
+To build the Windows installer:
+
+1. Install Inno Setup from [jrsoftware.org](https://jrsoftware.org/isdl.php)
+
+2. Build the executable:
+```bash
+poetry install
+poetry run python build_script.py
+```
+
+3. Compile the installer:
+   - Open `installer_script.iss` in Inno Setup
+   - Click "Compile" to create the installer
 
 ## Usage
 
+### GUI Mode
+1. Launch the application from the start menu or desktop shortcut
+2. Use the file browser to select a COA file (PDF or text)
+3. View results in the application window
+4. Export results to CSV if needed
+
+### Command Line Mode
 ```
 python3 CoaExtract.py [-h] [-i INPUT] [-o OUTPUT] [-v]
 
@@ -69,7 +129,7 @@ python3 CoaExtract.py -i certificate.pdf -o results.csv
 The script accepts the following input formats:
 
 1. **Plain text files** (.txt): Text files containing COA data in a tabular structure
-2. **PDF files** (.pdf): PDF documents containing COA information (requires PyPDF2)
+2. **PDF files** (.pdf): PDF documents containing COA information
 
 Example text format:
 
@@ -104,15 +164,23 @@ The script outputs:
 
 If an output file is specified, the results are saved to a CSV file with the same information.
 
-## Future Enhancements
+## Troubleshooting
 
-Potential improvements to consider:
-- OCR integration for processing scanned COA documents
-- Support for additional file formats (XLSX, DOC)
-- Web interface for uploading and processing COAs
-- Historical tracking of COA results
-- Statistical analysis of trends
-- Batch processing of multiple COA files
+Common issues and solutions:
+
+1. **Tesseract OCR not found**
+   - Ensure Tesseract is installed in the default location
+   - Add Tesseract to your system PATH
+   - Restart the application
+
+2. **Missing Visual C++ Redistributable**
+   - Run the installer again to install dependencies
+   - Download and install from Microsoft's website
+
+3. **Application fails to start**
+   - Check the log file in the application directory
+   - Ensure all dependencies are installed
+   - Try reinstalling the application
 
 ## License
 
