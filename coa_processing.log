@@ -3802,3 +3802,5 @@ Processing line 930: 'express permission of Denka Performance Elastomer and comp
 2025-04-14 16:39:23,066 - coa_analyzer.coa_analyzer - DEBUG - After clear: Memory usage: 819.77 MB
 2025-04-14 16:39:34,852 - coa_analyzer.coa_analyzer - DEBUG - Periodic Memory usage: 817.92 MB
 2025-04-14 16:39:34,852 - coa_analyzer.gui - DEBUG - Memory change since startup: 738.38 MB
+2025-04-14 16:40:04,852 - coa_analyzer.coa_analyzer - DEBUG - Periodic Memory usage: 817.88 MB
+2025-04-14 16:40:04,852 - coa_analyzer.gui - DEBUG - Memory change since startup: 738.33 MB

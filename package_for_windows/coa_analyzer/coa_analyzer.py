@@ -15,24 +15,20 @@ from coa_analyzer.coa_extract import extract_coa_data, extract_metadata, read_in
 from typing import cast, TypeGuard
 import PyPDF2
 
-# Create logs directory in user's AppData folder
-log_dir = os.path.join(os.path.expanduser('~'), 'AppData', 'Local', 'COA_Analyzer', 'logs')
-os.makedirs(log_dir, exist_ok=True)
-
 # Set up logging
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(os.path.join(log_dir, 'coa_processing.log'), mode='w')
+        logging.FileHandler('coa_processing.log', mode='w')
     ]
 )
 logger = logging.getLogger(__name__)
 
 # Set up crash logger
 crash_logger = logging.getLogger("coa_analyzer.crash")
-crash_handler = logging.FileHandler(os.path.join(log_dir, 'coa_crash.log'), mode='a')
+crash_handler = logging.FileHandler('coa_crash.log', mode='a')
 crash_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 crash_logger.addHandler(crash_handler)
 crash_logger.setLevel(logging.ERROR)
@@ -78,7 +74,7 @@ class COAAnalyzer(QMainWindow):
         
         # Set up a dedicated logger for GUI operations
         self.gui_logger = logging.getLogger("coa_analyzer.gui")
-        gui_handler = logging.FileHandler(os.path.join(log_dir, 'coa_gui.log'), mode='w')
+        gui_handler = logging.FileHandler('coa_gui.log', mode='w')
         gui_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
         self.gui_logger.addHandler(gui_handler)
         self.gui_logger.setLevel(logging.DEBUG)
@@ -928,4 +924,4 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-    main()
+    main() 

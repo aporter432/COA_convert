@@ -4,7 +4,6 @@ import argparse
 import csv
 import os
 import logging
-import subprocess
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict
 
@@ -29,124 +28,17 @@ except ImportError:
 
 from logging.handlers import RotatingFileHandler
 
-# Create logs directory in user's AppData folder
-log_dir = os.path.join(os.path.expanduser('~'), 'AppData', 'Local', 'COA_Analyzer', 'logs')
-os.makedirs(log_dir, exist_ok=True)
-
 # Set up logging
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(os.path.join(log_dir, 'coa_processing.log'), mode='w')
+        logging.FileHandler('coa_processing.log', mode='w')
     ]
 )
 logger = logging.getLogger(__name__)
 
-# Function to find Tesseract installation
-def find_tesseract():
-    """Find Tesseract OCR installation path."""
-    # Hardcoded paths for target machine
-    target_machine_path = r'C:\Users\calyn-furr\AppData\local\Programs\Tesseract-OCR'
-    if os.path.exists(os.path.join(target_machine_path, 'tesseract.exe')):
-        logger.debug(f"Found Tesseract at hardcoded path: {target_machine_path}")
-        return target_machine_path
-
-    # Check common installation paths as fallback
-    possible_paths = [
-        r'C:\Program Files\Tesseract-OCR',
-        r'C:\Program Files (x86)\Tesseract-OCR',
-        r'C:\Tesseract-OCR',
-        os.path.join(os.path.expandvars('%LOCALAPPDATA%'), 'Programs', 'Tesseract-OCR')
-    ]
-    
-    for path in possible_paths:
-        if os.path.exists(os.path.join(path, 'tesseract.exe')):
-            logger.debug(f"Found Tesseract at: {path}")
-            return path
-    
-    # Check if it's in PATH
-    try:
-        result = subprocess.run(['where', 'tesseract'], capture_output=True, text=True)
-        if result.returncode == 0:
-            tesseract_path = os.path.dirname(result.stdout.strip())
-            logger.debug(f"Found Tesseract in PATH: {tesseract_path}")
-            return tesseract_path
-    except Exception as e:
-        logger.debug(f"Could not check Tesseract in PATH: {e}")
-    
-    logger.warning("Tesseract OCR not found. Please install from https://github.com/UB-Mannheim/tesseract/wiki")
-    return None
-
-# Function to find Poppler installation
-def find_poppler():
-    """Find Poppler installation path."""
-    # Hardcoded paths for target machine
-    target_machine_path = r'C:\Users\calyn-furr\Downloads\Release\24.08.0-0'
-    poppler_bin_path = os.path.join(target_machine_path, 'bin')
-    if os.path.exists(poppler_bin_path) and os.path.exists(os.path.join(poppler_bin_path, 'pdftoppm.exe')):
-        logger.debug(f"Found Poppler at hardcoded path: {poppler_bin_path}")
-        return poppler_bin_path
-    
-    # Also check library/bin structure for the hardcoded path
-    poppler_lib_bin_path = os.path.join(target_machine_path, 'Library', 'bin')
-    if os.path.exists(poppler_lib_bin_path) and os.path.exists(os.path.join(poppler_lib_bin_path, 'pdftoppm.exe')):
-        logger.debug(f"Found Poppler at hardcoded path: {poppler_lib_bin_path}")
-        return poppler_lib_bin_path
-
-    # Check common installation paths as fallback
-    possible_paths = []
-    
-    # Check for versioned poppler installations
-    program_files = [r'C:\Program Files', r'C:\Program Files (x86)']
-    for base_path in program_files:
-        if os.path.exists(base_path):
-            # Look for poppler* folders
-            try:
-                for item in os.listdir(base_path):
-                    if item.startswith('poppler'):
-                        poppler_path = os.path.join(base_path, item, 'Library', 'bin')
-                        if os.path.exists(poppler_path):
-                            possible_paths.append(poppler_path)
-            except Exception as e:
-                logger.debug(f"Error searching in {base_path}: {e}")
-    
-    # Add other common locations
-    possible_paths.extend([
-        r'C:\poppler\bin',
-        r'C:\poppler-24.08.0\Library\bin',
-        r'C:\poppler-23.08.0\Library\bin',
-        os.path.join(os.path.expandvars('%LOCALAPPDATA%'), 'Programs', 'poppler-24.08.0', 'Library', 'bin'),
-        os.path.join(os.path.expandvars('%LOCALAPPDATA%'), 'Programs', 'poppler-23.08.0', 'Library', 'bin'),
-        os.path.join(os.path.expandvars('%LOCALAPPDATA%'), 'Programs', 'poppler', 'Library', 'bin')
-    ])
-    
-    for path in possible_paths:
-        if os.path.exists(os.path.join(path, 'pdftoppm.exe')):
-            logger.debug(f"Found Poppler at: {path}")
-            return path
-    
-    # Check if it's in PATH
-    try:
-        result = subprocess.run(['where', 'pdftoppm'], capture_output=True, text=True)
-        if result.returncode == 0:
-            poppler_path = os.path.dirname(result.stdout.strip())
-            logger.debug(f"Found Poppler in PATH: {poppler_path}")
-            return poppler_path
-    except Exception as e:
-        logger.debug(f"Could not check Poppler in PATH: {e}")
-    
-    logger.warning("Poppler not found. Please install from https://github.com/oschwartz10612/poppler-windows/releases/")
-    return None
-
-# Find paths at module load time
-tesseract_path = find_tesseract()
-poppler_path = find_poppler()
-
-# Configure pytesseract with Tesseract path if found
-if tesseract_path:
-    pytesseract.pytesseract.tesseract_cmd = os.path.join(tesseract_path, 'tesseract.exe')
 
 @dataclass
 class TestResult:
@@ -696,23 +588,6 @@ def read_pdf_file(file_path: str) -> str:
     reader = None
     coa_text = ""
     
-    # Check if dependencies are available
-    if not tesseract_path:
-        logger.error("Tesseract OCR not found. Please install from https://github.com/UB-Mannheim/tesseract/wiki")
-        # Show user-friendly message
-        print("\nError: Tesseract OCR is required but not found on this system.")
-        print("Please install Tesseract OCR from: https://github.com/UB-Mannheim/tesseract/wiki")
-        print("After installation, restart the application.\n")
-        return "ERROR: Tesseract OCR not found. Please install and restart."
-        
-    if not poppler_path:
-        logger.error("Poppler not found. Please install from https://github.com/oschwartz10612/poppler-windows/releases/")
-        # Show user-friendly message
-        print("\nError: Poppler PDF tools are required but not found on this system.")
-        print("Please install Poppler from: https://github.com/oschwartz10612/poppler-windows/releases/")
-        print("After installation, restart the application.\n")
-        return "ERROR: Poppler not found. Please install and restart."
-    
     try:
         # First try regular text extraction
         reader = PyPDF2.PdfReader(file_path)
@@ -734,13 +609,8 @@ def read_pdf_file(file_path: str) -> str:
         import tempfile
         with tempfile.TemporaryDirectory() as path:
             try:
-                logger.debug(f"Using found poppler path: {poppler_path}")
-                
-                # Convert PDF to images with found poppler path
-                images = pdf2image.convert_from_path(
-                    file_path,
-                    poppler_path=poppler_path
-                )
+                # Convert PDF to images
+                images = pdf2image.convert_from_path(file_path)
                 ocr_text = ""
                 
                 # Process each image with OCR

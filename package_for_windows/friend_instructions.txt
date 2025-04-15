@@ -1,0 +1,32 @@
+==========================================
+    COA ANALYZER - SIMPLE INSTRUCTIONS
+==========================================
+
+To install the COA Analyzer, follow these easy steps:
+
+1. Right-click on "COA_Analyzer_Setup.exe" and select "Run as administrator"
+
+2. If you see a security warning, click "Yes" or "Run" to continue
+
+3. Follow the on-screen instructions in the installer
+   (Just click "Next" to accept all the defaults)
+
+4. Wait for the installation to complete
+   (This might take 1-2 minutes)
+
+5. When installation finishes, the program will start automatically
+
+----- HOW TO USE THE PROGRAM -----
+
+1. To analyze a COA document, simply drag and drop any PDF file 
+   onto the program window
+
+2. The results will appear automatically
+
+3. To export results to Excel, click the "Export to CSV" button
+
+4. To clear the current results, click the "Clear Results" button
+
+If you need any help, please reach out!
+
+========================================== 
