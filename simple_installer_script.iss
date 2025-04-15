@@ -8,13 +8,26 @@ AppId={{94A9D9F9-8E7E-4BE8-8307-C85D3E8F0BAF}}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\{#MyAppName}
+; Change default install location to user's AppData folder (doesn't require admin rights)
+DefaultDirName={userappdata}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 OutputDir=Output
-OutputBaseFilename=COA_Analyzer_Setup
+OutputBaseFilename=COA_Analyzer_Setup_NoAdmin
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+; Set privileges to lowest to avoid requiring admin rights
+PrivilegesRequired=lowest
+; Disable auto-running with privileges as we don't want to try to elevate
+PrivilegesRequiredOverridesAllowed=dialog
+; Disable creating a Program Files folder since we're installing in user's directory
+DisableProgramGroupPage=yes
+; Set application directory as current directory
+SetupLogging=yes
+; Don't create uninstall registry entries in HKLM (requires admin)
+CreateUninstallRegKey=no
+UninstallDisplayIcon={app}\{#MyAppExeName}
+AlwaysShowDirOnReadyPage=yes
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -27,8 +40,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "dist\COA_Analyzer.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+; Create a start menu shortcut in user's start menu, not all users
+Name: "{userstartmenu}\Programs\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 
 [Run]
 ; Launch the app after installation
